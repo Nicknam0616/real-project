@@ -479,7 +479,7 @@ class WindowClass(QMainWindow, form_class):
             self.socket.on('message', self.receive_message)  # 소켓 메시지 연결
         except socketio.exceptions.ConnectionError as e:
             QMessageBox.warning(self, "서버 연결 오류", f"Flask 서버에 연결할 수 없습니다: {e}")
-
+#
     def append_incoming_packet(self, packet):
         """패킷을 UI에 추가하는 메서드"""
         import datetime
