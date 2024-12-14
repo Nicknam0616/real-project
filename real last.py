@@ -1,6 +1,7 @@
 import sys
+import psutil  # 메모리 사용량 확인을 위한 패키지
 from PyQt5.QtWidgets import *
-from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer, QThreadPool
 from PyQt5 import uic
 import openai
 from deep_translator import GoogleTranslator
@@ -9,11 +10,9 @@ from PyQt5.QtGui import QImage, QPixmap
 from flask import Flask, render_template
 from flask_socketio import SocketIO, emit
 import socketio
-import mediapipe as mp
 import numpy as np
 import serial
 from geopy.distance import geodesic
-import time
 
 # Flask 설정
 app = Flask(__name__)
@@ -42,8 +41,8 @@ class AIThread(QThread):
         self.translator = translator
 
     def run(self):
-        print("AIThread started")
-        try:
+        print("AIThread started")  # 변경됨
+        try:  # 변경됨
             translated_input = self.translator.translate(self.user_input)
             completion = self.client.chat.completions.create(
                 model="hugging-quants/Llama-3.2-3B-Instruct-Q8_0-GGUF/llama-3.2-3b-instruct-q8_0.gguf",
@@ -61,10 +60,10 @@ class AIThread(QThread):
             # 결과 신호 전송
             self.response_signal.emit(self.user_input, translated_output)
 
-        except openai.error.OpenAIError as e:
-            print(f"OpenAI API error: {e}")  # 구체적인 오류 메시지 출력
-        except Exception as e:
-            print(f"AIThread error: {e}")
+        except openai.error.OpenAIError as e:  # 변경됨
+            print(f"OpenAI API error: {e}")  # 변경됨
+        except Exception as e:  # 변경됨
+            print(f"AIThread error: {e}")  # 변경됨
 
 class CameraThread(QThread):
     change_pixmap_signal = pyqtSignal(QImage)
@@ -74,24 +73,23 @@ class CameraThread(QThread):
         self.mode = mode
         self.running = True
         self.cap = cv2.VideoCapture(0)  # 비디오 캡처 객체 초기화
-        #self.face_detection = mp.solutions.face_detection.FaceDetection(min_detection_confidence=0.2)
 
     def run(self):
-        print("CameraThread started")
-        while self.running:
-            ret, frame = self.cap.read()
-            if ret:
-                # 프레임 크기 조정
-                frame = cv2.resize(frame, (640, 480))
-                rgb_image = self.process_frame(frame)
+        print("CameraThread started")  # 변경됨
+        try:  # 변경됨
+            while self.running:
+                ret, frame = self.cap.read()
+                if ret:
+                    frame = cv2.resize(frame, (640, 480))
+                    rgb_image = self.process_frame(frame)
 
-                # QImage로 변환
-                h, w, ch = rgb_image.shape
-                bytes_per_line = ch * w
-                qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
+                    h, w, ch = rgb_image.shape
+                    bytes_per_line = ch * w
+                    qt_image = QImage(rgb_image.data, w, h, bytes_per_line, QImage.Format_RGB888)
 
-                # 신호를 통해 UI 업데이트
-                self.change_pixmap_signal.emit(qt_image)
+                    self.change_pixmap_signal.emit(qt_image)
+        except Exception as e:  # 변경됨
+            print(f"CameraThread error: {e}")  # 변경됨
 
     def stop(self):
         print("Stopping CameraThread")
@@ -107,8 +105,6 @@ class CameraThread(QThread):
             return cv2.cvtColor(gray_image, cv2.COLOR_GRAY2RGB)
         elif self.mode == "red_only":
             return self.red_only_detection(frame)
-        #elif self.mode == "face_tracking":
-        #    return self.face_tracking(frame)
         return frame
 
     def red_only_detection(self, frame):
@@ -123,22 +119,9 @@ class CameraThread(QThread):
         result = cv2.bitwise_and(frame, frame, mask=mask)
         return result
 
-    #def face_tracking(self, frame):
-    #    rgb_image = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    #    results = self.face_detection.process(rgb_image)
-    #    if results.detections:
-    #        for detection in results.detections:
-    #            bbox = detection.location_data.relative_bounding_box
-    #            ih, iw, _ = frame.shape
-    #            x, y, w, h = (int(bbox.xmin * iw), int(bbox.ymin * ih),
-    #                          int(bbox.width * iw), int(bbox.height * ih))
-    #            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-    #    return cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
     def change_mode(self, mode):
         print(f"Changing camera mode to: {mode}")
         self.mode = mode
-
 class WindowClass(QMainWindow, form_class):
     incoming_packet_signal = pyqtSignal(str)
     outgoing_packet_signal = pyqtSignal(str)
@@ -146,20 +129,25 @@ class WindowClass(QMainWindow, form_class):
     def __init__(self):
         super().__init__()
         self.setupUi(self)  # UI 설정
+        print("Appending incoming packet method:", hasattr(self, 'append_incoming_packet'))  # 확인
+        print("Appending outgoing packet method:", hasattr(self, 'append_outgoing_packet'))  # 확인
         self.client = openai.OpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio")
         self.translator = GoogleTranslator(source='ko', target='en')
 
         # 시리얼 포트 자동 설정
         port_number = 'COM13'  # 원하는 포트 번호로 수정하세요
-        self.bluetooth = self.connect_serial_port(port_number)
-        if not self.bluetooth:
-            QMessageBox.warning(self, "Port Error", f"Cannot find port {port_number}.")
+        try:
+            self.serial = serial.Serial(port_number, 9600, timeout=1)  # 'self.bluetooth'를 'self.serial'로 변경
+            if not self.serial.is_open:
+                raise serial.SerialException(f"{port_number} 포트를 열 수 없습니다.")
+        except serial.SerialException as e:
+            QMessageBox.warning(self, "포트 오류", str(e))
+            QTimer.singleShot(5000, self.close)  # 5초 후 종료
             return
 
-        # CameraThread 인스턴스 생성
+        # CameraThread 인스턴스 생성 (즉시 시작하지 않음)
         self.camera_thread = CameraThread("basic")
         self.camera_thread.change_pixmap_signal.connect(self.update_image)
-        self.camera_thread.start()
 
         # 시그널 연결
         self.incoming_packet_signal.connect(self.append_incoming_packet)
@@ -195,11 +183,44 @@ class WindowClass(QMainWindow, form_class):
         # 타이머 설정
         self.movement_timer = QTimer(self)
         self.movement_timer.timeout.connect(self.send_movement_commands)
-        self.movement_timer.start(100)  # 100ms마다 패킷 전송
+        self.movement_timer.start(1000)  # 1000ms마다 패킷 전송
 
         # 소켓.io 클라이언트 초기화
         self.socket = socketio.Client()
         self.connect_socket()
+
+        # 로그 표시용 QTextEdit 초기화
+        self.log_text = QTextEdit(self)
+        self.log_text.setReadOnly(True)
+        self.log_text.setGeometry(0, 0, 0, 0)
+
+        # 메모리 사용량 표시용 QTextEdit 초기화
+        self.log_2_text = QTextEdit(self)
+        self.log_2_text.setReadOnly(True)
+        self.log_2_text.setGeometry(0, 0, 0, 0)
+
+        # 기능 버튼 설정
+        self.b4.clicked.connect(self.toggle_ai_function)
+        self.b5.clicked.connect(self.toggle_chat_function)
+        self.b6.clicked.connect(self.toggle_packet_logging)
+        self.b7.clicked.connect(self.start_camera_function)
+
+        self.ai_active = False
+        self.chat_active = False
+        self.packet_logging_active = False
+        self.camera_active = False
+
+    def connect_socket(self):
+        try:
+            self.socket.connect('http://localhost:5000')  # Flask 서버 주소
+            self.socket.on('message', self.receive_message)  # 소켓 메시지 연결
+        except socketio.exceptions.ConnectionError:
+            QMessageBox.warning(self, "서버 연결 오류", "Flask 서버에 연결할 수 없습니다.")
+
+    def setup_navigation_buttons(self):
+        self.b1.clicked.connect(self.start_navigation)
+        self.b2.clicked.connect(self.move_and_return)
+        self.b3.clicked.connect(self.stop_and_clear)
 
     def connect_serial_port(self, port_name):
         print("Connecting to serial port...")
@@ -237,7 +258,7 @@ class WindowClass(QMainWindow, form_class):
 
     def send_movement_commands(self):
         print("Sending movement commands...")
-        fire_status = 1 if self.fire_status else 0  # 발사 버튼 상태에 따라 1 또는 0 설정
+        fire_status = 1 if self.fire_status else 0
         if self.key_status['W']:
             packet = f'1,{fire_status}\n'
         elif self.key_status['A']:
@@ -247,10 +268,17 @@ class WindowClass(QMainWindow, form_class):
         elif self.key_status['D']:
             packet = f'4,{fire_status}\n'
         else:
-            packet = f'0,{fire_status}\n'  # 아무 키도 눌리지 않을 때
+            packet = f'0,{fire_status}\n'
 
-        self.bluetooth.write(packet.encode())  # 패킷 전송
-        self.outgoing_packet_signal.emit(packet)  # 나가는 패킷 추가
+        print(f"Sending packet: {packet}")  # 패킷 전송 전 로그 추가
+        try:
+            if self.serial:  # serial이 None이 아닐 때만 전송
+                self.serial.write(packet.encode())
+                self.outgoing_packet_signal.emit(packet)
+            else:
+                print("Serial connection is not established.")
+        except Exception as e:
+            print(f"Error sending command: {e}")  # 예외 처리 추가
 
     def fire(self):
         print("Fire command issued.")
@@ -313,14 +341,17 @@ class WindowClass(QMainWindow, form_class):
 
     def get_current_location(self):
         print("Getting current location...")
-        while self.bluetooth.in_waiting > 0:
-            line = self.bluetooth.readline().decode('utf-8').strip()
-            if line.startswith("Lat/Long:"):
-                parts = line.split()
-                latitude = float(parts[1].strip(','))
-                longitude = float(parts[2])
-                self.append_incoming_packet(f"현재 위치: {latitude}, {longitude}")  # 들어오는 데이터 추가
-                return (latitude, longitude)
+        try:
+            while self.serial and self.serial.in_waiting > 0:  # serial이 None이 아닐 때만 확인
+                line = self.serial.readline().decode('utf-8').strip()
+                if line.startswith("Lat/Long:"):
+                    parts = line.split()
+                    latitude = float(parts[1].strip(','))
+                    longitude = float(parts[2])
+                    self.append_incoming_packet(f"현재 위치: {latitude}, {longitude}")
+                    return (latitude, longitude)
+        except Exception as e:
+            print(f"Error reading current location: {e}")  # 예외 처리 추가
         return None
 
     def get_target_location(self):
@@ -422,7 +453,7 @@ class WindowClass(QMainWindow, form_class):
 
     def change_camera_mode(self, mode):
         print(f"Changing camera mode to: {mode}")
-        self.camera_thread.change_mode(mode)
+        self.camera_thread.change_mode(mode)  # 변경된 모드로 카메라 변경
 
     # UI 요소를 읽기 전용으로 설정
     def setup_readonly_fields(self):
@@ -446,6 +477,8 @@ class WindowClass(QMainWindow, form_class):
         self.speed_real.setReadOnly(True)
         self.temperature.setReadOnly(True)
         self.humidity.setReadOnly(True)
+        self.log.setReadOnly(True)  # log QTextEdit
+        self.log_2.setReadOnly(True)  # log_2 QTextEdit
 
         self.under3.setStyleSheet("background-color: lightyellow;")  # 배경색 설정
 
@@ -461,43 +494,69 @@ class WindowClass(QMainWindow, form_class):
 
     # 카메라 모드 변경 버튼 연결
     def setup_camera_mode_buttons(self):
-        self.b_c.clicked.connect(lambda: self.change_camera_mode("basic"))
+        self.b_c.clicked.connect(self.show_basic_camera)  # 기본 카메라 보이기
         self.b_d.clicked.connect(lambda: self.change_camera_mode("black_white"))
         self.b_r.clicked.connect(self.red_only_mode)
-        #self.b_f.clicked.connect(lambda: self.change_camera_mode("face_tracking"))
 
-    # 목표 경도 입력 필드
-    def setup_navigation_buttons(self):
-        self.b1.clicked.connect(self.start_navigation)
-        self.b2.clicked.connect(self.move_and_return)
-        self.b3.clicked.connect(self.stop_and_clear)
+    def show_basic_camera(self):
+        print("Showing basic camera.")
+        self.camera_thread.change_mode("basic")  # 기본 카메라 모드로 변경
 
-    # 소켓 연결 및 예외 처리
-    def connect_socket(self):
-        try:
-            self.socket.connect('http://localhost:5000', namespaces=['/'])  # 특정 네임스페이스를 지정할 수 있습니다.
-            self.socket.on('message', self.receive_message)  # 소켓 메시지 연결
-        except socketio.exceptions.ConnectionError as e:
-            QMessageBox.warning(self, "서버 연결 오류", f"Flask 서버에 연결할 수 없습니다: {e}")
-#
+    def start_camera_function(self):
+        print("Starting camera function.")
+        if not self.camera_active:
+            self.camera_active = True
+            self.camera_thread.start()
+            self.log_text.append("카메라 기능이 활성화되었습니다.")
+        else:
+            self.camera_active = False
+            self.camera_thread.stop()
+            self.log_text.append("카메라 기능이 비활성화되었습니다.")
+
+    def toggle_ai_function(self):
+        self.ai_active = not self.ai_active
+        if self.ai_active:
+            self.log.append("AI 기능이 활성화되었습니다.")  # log에 메시지 추가
+        else:
+            self.log.append("AI 기능이 비활성화되었습니다.")  # log에 메시지 추가
+
+    def toggle_chat_function(self):
+        self.chat_active = not self.chat_active
+        if self.chat_active:
+            self.log.append("외부 채팅 기능이 활성화되었습니다.")  # log에 메시지 추가
+        else:
+            self.log.append("외부 채팅 기능이 비활성화되었습니다.")  # log에 메시지 추가
+
+    def toggle_packet_logging(self):
+        self.packet_logging_active = not self.packet_logging_active
+        if self.packet_logging_active:
+            self.log.append("패킷 로그 기능이 활성화되었습니다.")  # log에 메시지 추가
+        else:
+            self.log.append("패킷 로그 기능이 비활성화되었습니다.")  # log에 메시지 추가
+
     def append_incoming_packet(self, packet):
-        """패킷을 UI에 추가하는 메서드"""
         import datetime
         current_time = datetime.datetime.now().strftime("%H:%M")
-        self.line1.append(f"-> {current_time} | {packet}")  # 또는 적절한 UI 요소에 추가
+        print(f"Incoming packet: {packet}")  # 패킷이 들어올 때 로그 추가
+        self.under3.append(f"-> {current_time} | {packet}")  # under3에 추가
 
     def append_outgoing_packet(self, packet):
-        """나가는 패킷을 UI에 추가하는 메서드"""
         import datetime
         current_time = datetime.datetime.now().strftime("%H:%M")
         packet_display = packet.replace("\n", "\\n")  # \n을 \\n으로 표시
-        self.line1.append(f"<- {current_time} | {packet_display}")  # 또는 적절한 UI 요소에 추가
+        print(f"Outgoing packet: {packet_display}")  # 패킷이 나갈 때 로그 추가
+        self.under3.append(f"<- {current_time} | {packet_display}")  # under3에 추가
+
+    def update_memory_usage(self):
+        memory_usage = psutil.virtual_memory().percent
+        self.log_2.setText(f"메모리 사용량: {memory_usage}%")  # log_2에 메모리 사용량 표시
 
 if __name__ == "__main__":
     import threading
 
     # Flask 서버를 별도의 스레드에서 실행
-    flask_thread = threading.Thread(target=lambda: socketio_server.run(app, host='0.0.0.0', allow_unsafe_werkzeug=True))
+    flask_thread = threading.Thread(
+        target=lambda: socketio_server.run(app, host='0.0.0.0', allow_unsafe_werkzeug=True))
     flask_thread.start()
 
     # QApplication 인스턴스 생성
@@ -509,5 +568,11 @@ if __name__ == "__main__":
     # 프로그램 화면을 보여주는 코드
     myWindow.show()
 
+    # 메모리 사용량 업데이트 타이머
+    memory_timer = QTimer()
+    memory_timer.timeout.connect(myWindow.update_memory_usage)
+    memory_timer.start(5000)  # 5초마다 메모리 사용량 업데이트
+
     # 프로그램을 이벤트 루프로 진입시키는 (프로그램을 작동시키는) 코드
     sys.exit(app.exec_())
+

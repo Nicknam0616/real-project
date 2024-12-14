@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Chat Application</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/3.0.3/socket.io.js"></script>
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+    <script type="text/javascript" charset="utf-8">
+        $(document).ready(function() {
+            var socket = io();
+            $('form').submit(function() {
+                const msg = $('#myMessage').val();
+                socket.send({'user': 'site', 'msg': msg});
+                $('#myMessage').val('');
+                return false;
+            });
+            socket.on('message', function(data) {
+                $('#messages').append($('<li>').text(data.user + ': ' + data.msg));
+            });
+        });
+    </script>
+</head>
+<body>
+    <h1>Welcome to the Chat Application!</h1>
+    <ul id="messages"></ul>
+    <form action="">
+        <input id="myMessage" autocomplete="off"><button>Send</button>
+    </form>
+</body>
+</html>
